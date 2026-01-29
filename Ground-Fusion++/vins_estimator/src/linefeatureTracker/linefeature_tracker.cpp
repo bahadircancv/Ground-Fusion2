@@ -74,39 +74,29 @@ map<int, vector<pair<int, Vector4d>>> LineFeatureTracker::trackImagewithline(dou
         forwframe_->img = img;
     }
     TicToc t_li;
-    Ptr<line_descriptor::LSDDetectorC> lsd_ = line_descriptor::LSDDetectorC::createLSDDetectorC();
-    // lsd parameters
-    line_descriptor::LSDDetectorC::LSDOptions opts;
-    opts.refine = 1;                //1     	The way found lines will be refined
-    opts.scale = 0.5;               //0.8   	The scale of the image that will be used to find the lines. Range (0..1].
-    opts.sigma_scale = 0.6;         //0.6  	Sigma for Gaussian filter. It is computed as sigma = _sigma_scale/_scale.
-    opts.quant = 2.0;               //2.0   Bound to the quantization error on the gradient norm
-    opts.ang_th = 22.5;             //22.5	Gradient angle tolerance in degrees
-    opts.log_eps = 1.0;             //0		Detection threshold: -log10(NFA) > log_eps. Used only when advance refinement is chosen
-    opts.density_th = 0.6;          //0.7	Minimal density of aligned region points in the enclosing rectangle.
-    opts.n_bins = 1024;             //1024 	Number of bins in pseudo-ordering of gradient modulus.
-    double min_line_length = 0.125; // Line segments shorter than that are rejected
-    // opts.refine       = 1;
-    // opts.scale        = 0.5;
-    // opts.sigma_scale  = 0.6;
-    // opts.quant        = 2.0;
-    // opts.ang_th       = 22.5;
-    // opts.log_eps      = 1.0;
-    // opts.density_th   = 0.6;
-    // opts.n_bins       = 1024;
-    // double min_line_length = 0.125;
-    opts.min_length = min_line_length * (std::min(img.cols, img.rows));
+    std::vector<cv::line_descriptor::KeyLine> lsd, keylsd;
 
-    std::vector<KeyLine> lsd, keylsd;
-    //void LSDDetectorC::detect( const std::vector<Mat>& images, std::vector<std::vector<KeyLine> >& keylines, int scale, int numOctaves, const std::vector<Mat>& masks ) const
-    lsd_->detect(img, lsd, 2, 1, opts);
-    // visualize_line(img,lsd);
-    // step 1: line extraction
-    // TicToc t_li;
-    // std::vector<KeyLine> lsd, keylsd;
-    // Ptr<LSDDetector> lsd_;
-    // lsd_ = cv::line_descriptor::LSDDetector::createLSDDetector();
-    // lsd_->detect( img, lsd, 2, 2 );
+    try {
+        cv::Ptr<cv::line_descriptor::LSDDetectorC> lsd_ =
+            cv::line_descriptor::LSDDetectorC::createLSDDetectorC();
+
+        cv::line_descriptor::LSDDetectorC::LSDOptions opts;
+        opts.refine = 1;
+        opts.scale = 0.5;
+        opts.sigma_scale = 0.6;
+        opts.quant = 2.0;
+        opts.ang_th = 22.5;
+        opts.log_eps = 1.0;
+        opts.density_th = 0.6;
+        opts.n_bins = 1024;
+        opts.min_length = 0.125 * (std::min(img.cols, img.rows));
+
+        lsd_->detect(img, lsd, 2, 1, opts);
+    } catch (const cv::Exception& e) {
+        // OpenCV LSD not available; skip line detection.
+        ROS_ERROR_STREAM_THROTTLE(5.0, "OpenCV line detector unavailable; line detection disabled.");
+    }
+
 
     sum_time += t_li.toc();
     //ROS_INFO("line detect costs: %fms", t_li.toc());

@@ -12,6 +12,7 @@ extern Triangle_manager             g_triangles_manager;
 extern LiDAR_frame_pts_and_pose_vec g_eigen_vec_vec;
 
 extern Eigen::Matrix3d g_camera_K;
+extern Eigen::Matrix<double, 3, 3, Eigen::RowMajor> camera_ext_R;
 // extern Eigen::Matrix3d lidar_frame_to_camera_frame;
 
 template < int M, int option = EIGEN_DATA_TYPE_DEFAULT_OPTION >
@@ -409,7 +410,10 @@ void draw_camera_pose( int current_frame_idx, float pt_disp_size, float display_
     Eigen::Quaterniond pose_q( g_eigen_vec_vec[ current_frame_idx ].second.head< 4 >() );
     vec_3              pose_t = g_eigen_vec_vec[ current_frame_idx ].second.block( 4, 0, 3, 1 );
     mat_3_3            lidar_frame_to_camera_frame;
-    lidar_frame_to_camera_frame << 1, 0, 0, 0, 1, 0, 0, 0, 1;
+    if (camera_ext_R.allFinite())
+        lidar_frame_to_camera_frame = Eigen::Matrix3d(camera_ext_R).transpose();
+    else
+        lidar_frame_to_camera_frame << 1, 0, 0, 0, 1, 0, 0, 0, 1;
     pose_q = Eigen::Quaterniond( pose_q.toRotationMatrix() * lidar_frame_to_camera_frame );
 
     pose_t = pose_q.inverse() * ( pose_t * -1.0 );
@@ -429,7 +433,10 @@ void draw_camera_pose(int current_frame_idx, const Eigen::Matrix3d &R_w2c, const
     vec_3              pose_t = g_eigen_vec_vec[ current_frame_idx ].second.block( 4, 0, 3, 1 );
     mat_3_3            lidar_frame_to_camera_frame;
     // lidar_frame_to_camera_frame << 0, 0, 1, -1, 0, 0, 0, -1, 0;
-    lidar_frame_to_camera_frame << 1, 0, 0, 0, 1, 0, 0, 0, 1;
+    if (camera_ext_R.allFinite())
+        lidar_frame_to_camera_frame = Eigen::Matrix3d(camera_ext_R).transpose();
+    else
+        lidar_frame_to_camera_frame << 1, 0, 0, 0, 1, 0, 0, 0, 1;
     pose_q = Eigen::Quaterniond( pose_q.toRotationMatrix() * lidar_frame_to_camera_frame );
 
     pose_t = pose_q.inverse() * ( pose_t * -1.0 );

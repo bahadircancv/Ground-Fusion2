@@ -750,11 +750,18 @@ void Voxel_mapping::read_ros_parameters( ros::NodeHandle &nh )
         0.0, 0.0, 1.0};
     camera_dist_coeffs_data = {k1, k2, p1, p2, 0.0};
 
-    camera_ext_R_data ={0.0722207, 0.5210047,  0.8504930,
-                        -0.9973866,  0.0394820, 0.0605080,
-                        -0.0020542, -0.8526402, 0.5224945};
+    // Prefer camera extrinsics from params if provided, otherwise fall back to defaults.
+    if (m_camera_extrin_R.size() == 9)
+        camera_ext_R_data = m_camera_extrin_R;
+    else
+        camera_ext_R_data = {0.0722207, 0.5210047,  0.8504930,
+                             -0.9973866,  0.0394820, 0.0605080,
+                             -0.0020542, -0.8526402, 0.5224945};
 
-    camera_ext_t_data = {0.07433266, -0.038064, -0.4392086};
+    if (m_camera_extrin_T.size() == 3)
+        camera_ext_t_data = m_camera_extrin_T;
+    else
+        camera_ext_t_data = {0.07433266, -0.038064, -0.4392086};
 
     m_camera_intrinsic = Eigen::Map< Eigen::Matrix< double, 3, 3, Eigen::RowMajor > >( camera_intrinsic_data.data() );
     m_camera_dist_coeffs = Eigen::Map< Eigen::Matrix< double, 5, 1 > >( camera_dist_coeffs_data.data() );
@@ -858,5 +865,4 @@ void Voxel_mapping::process_image(cv::Mat &temp_img, double msg_time)
 
     total_frame_count++;
 }
-
 

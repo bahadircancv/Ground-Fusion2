@@ -75,11 +75,9 @@ void transformPointCloudToFusionFrame(
     Eigen::Matrix3d R_fusion_to_world = pose_q.toRotationMatrix();
     Eigen::Vector3d t_fusion_to_world = pose_t;
 
-    // Eigen::Matrix3d R_imu_to_fusion = R_fusion_to_world.transpose() * R_imu_to_world;
-    // Eigen::Vector3d t_imu_to_fusion = R_fusion_to_world.transpose() * (t_imu_to_world - t_fusion_to_world);
-    
-    R_imu_to_fusion = R_imu_to_world * R_fusion_to_world.transpose();
-    t_imu_to_fusion = R_imu_to_fusion * t_imu_to_world - t_fusion_to_world;
+    // IMU -> fusion (world alignment)
+    R_imu_to_fusion = R_fusion_to_world.transpose() * R_imu_to_world;
+    t_imu_to_fusion = R_fusion_to_world.transpose() * (t_imu_to_world - t_fusion_to_world);
 
     // std::cout << "R_imu_to_fusion:\n" << R_imu_to_fusion << std::endl;
     // std::cout << "t_imu_to_fusion:\n" << t_imu_to_fusion.transpose() << std::endl;
@@ -87,7 +85,7 @@ void transformPointCloudToFusionFrame(
     transformed_pts->clear();
     for (const auto& point : frame_pts->points) {
         Eigen::Vector3d p_imu(point.x, point.y, point.z);
-        Eigen::Vector3d p_fusion =  R_imu_to_fusion * p_imu - t_imu_to_fusion;
+        Eigen::Vector3d p_fusion =  R_imu_to_fusion * p_imu + t_imu_to_fusion;
 
         pcl::PointXYZI transformed_point;
         transformed_point.x = p_fusion.x();
@@ -269,6 +267,14 @@ void incremental_mesh_reconstruction( pcl::PointCloud< pcl::PointXYZI >::Ptr fra
 
     image_pose->m_acc_render_count = 0;
     image_pose->m_acc_photometric_error = 0;
+    std::atomic<long long> total_pts(0);
+    std::atomic<long long> proj_ok(0);
+    static bool logged_proj_extrinsics = false;
+    if (!logged_proj_extrinsics) {
+        logged_proj_extrinsics = true;
+        std::cout << "[ImMesh] projection extR (mapping/extrinsic_R):\n" << R_c2i << std::endl;
+        std::cout << "[ImMesh] projection extT (mapping/extrinsic_T): " << t_c2i.transpose() << std::endl;
+    }
     try
     {
         cv::parallel_for_(cv::Range(0, numbers_of_voxels), [&](const cv::Range &r) {
@@ -283,9 +289,11 @@ void incremental_mesh_reconstruction( pcl::PointCloud< pcl::PointXYZI >::Ptr fra
                 RGB_voxel_ptr voxel_ptr = voxels_for_render[voxel_idx];
                 for (int pt_idx = 0; pt_idx < voxel_ptr->m_pts_in_grid.size(); pt_idx++)
                 {
+                    total_pts.fetch_add(1, std::memory_order_relaxed);
                     pt_w = voxel_ptr->m_pts_in_grid[pt_idx]->get_pos();
                     if (image_pose->project_3d_point_in_this_img(pt_w, u, v, nullptr, 1.0) == false)
                         continue;
+                    proj_ok.fetch_add(1, std::memory_order_relaxed);
 
                     pt_cam_norm = (pt_w - image_pose->m_pose_w2c_t).norm();
                     rgb_color = image_pose->get_rgb(u, v, 0);
@@ -310,6 +318,14 @@ void incremental_mesh_reconstruction( pcl::PointCloud< pcl::PointXYZI >::Ptr fra
         }
         return;
     }
+    static int debug_frame = 0;
+    if (debug_frame % 30 == 0) {
+        std::cout << "[ImMesh] colorization: total_pts=" << total_pts.load()
+                  << " projected=" << proj_ok.load()
+                  << " img_size=" << image_pose->m_img.cols << "x" << image_pose->m_img.rows
+                  << std::endl;
+    }
+    debug_frame++;
     double time_b = tim_render.toc();
 
     std::atomic< int >    voxel_idx( 0 );
@@ -682,6 +698,15 @@ void Voxel_mapping::lidar_callback( const sensor_msgs::PointCloud2::ConstPtr &ms
 }
 
 void Voxel_mapping::image_callback(const sensor_msgs::CompressedImageConstPtr &msg) {
+    static size_t img_count = 0;
+    if (img_count % 30 == 0) {
+        std::cout << "[ImMesh] /img received, seq=" << msg->header.seq
+                  << " stamp=" << msg->header.stamp.toSec()
+                  << " frame_id=" << msg->header.frame_id
+                  << " format=" << msg->format
+                  << " data_size=" << msg->data.size() << std::endl;
+    }
+    img_count++;
 
     m_mutex_buffer.lock();
     if(msg->header.stamp.toSec() < m_last_timestamp_img)
@@ -691,7 +716,14 @@ void Voxel_mapping::image_callback(const sensor_msgs::CompressedImageConstPtr &m
     }
 
     m_last_timestamp_img = msg->header.stamp.toSec();
-    cv_bridge::CvImagePtr cv_ptr_compressed = cv_bridge::toCvCopy( msg, sensor_msgs::image_encodings::BGR8 );
+    cv_bridge::CvImagePtr cv_ptr_compressed;
+    try {
+        cv_ptr_compressed = cv_bridge::toCvCopy( msg, sensor_msgs::image_encodings::BGR8 );
+    } catch (const cv_bridge::Exception& e) {
+        std::cerr << "[ImMesh] cv_bridge decode failed: " << e.what() << std::endl;
+        m_mutex_buffer.unlock();
+        return;
+    }
     double img_rec_time = msg->header.stamp.toSec();
     m_img = cv_ptr_compressed->image;
     cv_ptr_compressed->image.release();
@@ -754,12 +786,15 @@ void Voxel_mapping::sendData() {
 
             auto img = m_img_buffer.front();
             m_img_buffer.pop_front();
+            double img_ts = m_img_time_buffer.front();
+            m_img_time_buffer.pop_front();
 
 
             auto pose = m_pose_buffer.front();
             Eigen::Vector3d position(pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
             Eigen::Quaterniond rotation(pose.pose.orientation.w, pose.pose.orientation.x, pose.pose.orientation.y, pose.pose.orientation.z);
             m_pose_buffer.pop_front();
+            double pose_ts = pose.header.stamp.toSec();
 
             auto orin_pose = m_orin_pose_buffer.front();
             Eigen::Vector3d orin_position(orin_pose.pose.position.x, orin_pose.pose.position.y, orin_pose.pose.position.z);
@@ -768,6 +803,11 @@ void Voxel_mapping::sendData() {
 
             if( !world_lidar_full->points.empty() && !img.empty() )
             {
+                if (data_id % 30 == 0) {
+                    std::cout << "[ImMesh] sync: pose_ts=" << pose_ts
+                              << " img_ts=" << img_ts
+                              << " dt=" << (pose_ts - img_ts) << std::endl;
+                }
                 g_mutex_all_data_package_lock.lock();
                 g_rec_color_data_package_list.emplace_back(world_lidar_full, img, rotation, position, data_id, orin_position, orin_rotation);
                 g_mutex_all_data_package_lock.unlock();

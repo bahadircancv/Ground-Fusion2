@@ -223,7 +223,7 @@ namespace zjloc
           nav_msgs::Odometry endOdomMsg;
 
           Eigen::Vector3d g_odom = Eigen::Vector3d(0, 0, -1); 
-          Eigen::Vector3d g_imu = Eigen::Vector3d(0, -1, 0); 
+          Eigen::Vector3d g_imu = Eigen::Vector3d(0, 0, -1); 
 
           std::string text;
 

@@ -171,10 +171,15 @@ void print_help_window( bool *if_display_help_win )
 void get_last_avr_pose( int current_frame_idx, Eigen::Quaterniond &q_avr, vec_3 &t_vec )
 {
     const int win_ssd = 1;
-    mat_3_3   lidar_frame_to_camera_frame;
-    // Clang-format off
-    lidar_frame_to_camera_frame << 0, 0, -1, -1, 0, 0, 0, 1, 0;
-    // Clang-format on
+    // Use camera extrinsics if available (camera->lidar is provided; we need lidar->camera).
+    Eigen::Matrix3d lidar_frame_to_camera_frame = Eigen::Matrix3d::Identity();
+    lidar_frame_to_camera_frame = Eigen::Matrix3d(camera_ext_R).transpose();
+    static bool logged_extrinsic = false;
+    if (!logged_extrinsic) {
+        logged_extrinsic = true;
+        std::cout << "[ImMesh] camera_ext_R:\n" << Eigen::Matrix3d(camera_ext_R) << std::endl;
+        std::cout << "[ImMesh] lidar_frame_to_camera_frame:\n" << lidar_frame_to_camera_frame << std::endl;
+    }
     q_avr = Eigen::Quaterniond::Identity();
     t_vec = vec_3::Zero();
     if ( current_frame_idx < 1 )
